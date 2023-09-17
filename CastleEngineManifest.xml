@@ -9,4 +9,10 @@ See https://castle-engine.io/project_manifest for documentation of this file.
   standalone_source="jenkins_disk_cleanup.dpr"
 >
   <data exists="false" />
+  <compiler_options>
+    <search_paths>
+      <!-- Use CGE units to execute programs. -->
+      <path value="../castle-engine/tools/common-code" />
+    </search_paths>
+  </compiler_options>
 </project>
