@@ -70,19 +70,99 @@ begin
   end;
 end;
 
+var
+  BranchPermalinks: TIntegerList;
+
 procedure FindBranchDir(const FileInfo: TFileInfo; Data: Pointer; var StopSearch: boolean);
+
+  { Read permalinks Jenkins file (with "last successfull" etc.),
+    put all numbers into Permalinks.
+    We don't differentiate between them (what is "last successfull",
+    "last failed") because they all should be protected from deletion.
+
+    Sample file contents:
+
+      lastCompletedBuild 2
+      lastFailedBuild 2
+      lastStableBuild -1
+      lastSuccessfulBuild -1
+      lastUnstableBuild -1
+      lastUnsuccessfulBuild 2
+  }
+  procedure ReadPermalinks(const FileName: String; Permalinks: TIntegerList);
+  var
+    Lines: TCastleStringList;
+    Line, Token: String;
+    SeekPos, BuildNum: Integer;
+  begin
+    Permalinks.Clear;
+    Lines := TCastleStringList.Create;
+    try
+      Lines.LoadFromFile(FileName);
+      for Line in Lines do
+        if Trim(Line) <> '' then
+        begin
+          SeekPos := 1;
+
+          Token := NextToken(Line, SeekPos);
+          if Token = '' then
+            raise Exception.CreateFmt('Cannot read 1st token in line "%s" from file "%s"', [
+              Line,
+              FileName
+            ]);
+
+          Token := NextToken(Line, SeekPos);
+          if Token = '' then
+            raise Exception.CreateFmt('Cannot read 2nd token in line "%s" from file "%s"', [
+              Line,
+              FileName
+            ]);
+
+          BuildNum := StrToInt(Token);
+          if BuildNum >= 0 then
+            Permalinks.Add(BuildNum)
+          else
+          if BuildNum <> -1 then
+            raise Exception.CreateFmt('Unexpected negative build number "%d" in file "%s"', [
+              BuildNum,
+              FileName
+            ]);
+        end;
+    finally FreeAndNil(Lines) end;
+  end;
+
+  function PermalinksToStr(const List: TIntegerList): String;
+  var
+    I: Integer;
+  begin
+    Result := '';
+    for I in List do
+      Result := SAppendPart(Result, ', ', IntToStr(I));
+    Result := '[' + Result + ']';
+  end;
+
 begin
   if not FileInfo.Directory then
     Exit;
-  SizeInBranch := 0;
-  SizeInBranchToFree := 0;
-  FindFiles(InclPathDelim(FileInfo.AbsoluteName) + 'builds', '*',
-    true, @FindBuildDir, nil, []);
-  Writeln(Format('  Branch: ' + FileInfo.Name + ' (to free: %s, total: %s)', [
-    SizeToStr(SizeInBranchToFree),
-    SizeToStr(SizeInBranch)
-  ]));
-  Flush(Output); // see results immediately, while sizes of next dirs is calculated
+
+  BranchPermalinks := TIntegerList.Create;
+  try
+    ReadPermalinks(
+      InclPathDelim(FileInfo.AbsoluteName) + 'builds' + PathDelim + 'permalinks',
+      BranchPermalinks);
+
+    SizeInBranch := 0;
+    SizeInBranchToFree := 0;
+    FindFiles(InclPathDelim(FileInfo.AbsoluteName) + 'builds', '*',
+      true, @FindBuildDir, nil, []);
+    Writeln(Format('  Branch: ' + FileInfo.Name + '. To free: %s, total: %s. Permalinks: %s', [
+      SizeToStr(SizeInBranchToFree),
+      SizeToStr(SizeInBranch),
+      PermalinksToStr(BranchPermalinks)
+    ]));
+    Flush(Output); // see results immediately, while sizes of next dirs is calculated
+
+  finally FreeAndNil(BranchPermalinks) end;
 end;
 
 procedure ProcessBranchesDir(const BranchesDir: String);
