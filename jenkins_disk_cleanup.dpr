@@ -9,7 +9,7 @@ const
 
   { Keep this many last builds.
     They will not be deleted, even if older than DeleteWhenOlderThanDays. }
-  KeepLastBuilds = 5;
+  KeepLastBuilds = 10;
 
   BaseJenkinsJobsDir = '/var/lib/jenkins/jobs';
 
