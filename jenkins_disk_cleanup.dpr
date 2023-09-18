@@ -70,10 +70,9 @@ begin
   end;
 end;
 
+procedure FindBranchDir(const FileInfo: TFileInfo; Data: Pointer; var StopSearch: boolean);
 var
   BranchPermalinks: TIntegerList;
-
-procedure FindBranchDir(const FileInfo: TFileInfo; Data: Pointer; var StopSearch: boolean);
 
   { Read permalinks Jenkins file (with "last successfull" etc.),
     put all numbers into Permalinks.
@@ -150,6 +149,8 @@ begin
     ReadPermalinks(
       InclPathDelim(FileInfo.AbsoluteName) + 'builds' + PathDelim + 'permalinks',
       BranchPermalinks);
+
+    // TODO: BranchBuildToKeep := GetMinimumBuildToKeep(BranchPermalinks) - KeepLastBuilds;
 
     SizeInBranch := 0;
     SizeInBranchToFree := 0;
