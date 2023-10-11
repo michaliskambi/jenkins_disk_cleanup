@@ -1,6 +1,6 @@
 uses SysUtils, DateUtils,
   CastleFindFiles, CastleLog, CastleStringUtils, CastleFilesUtils,
-  CastleUtils, CastleParameters,
+  CastleUtils, CastleParameters, CastleApplicationProperties,
   ToolCommonUtils;
 
 const
@@ -42,14 +42,14 @@ begin
 end;
 
 var
-  SizeAll, SizeAllToFree: QWord;
+  SizeAll, SizeAllFreed: QWord;
 
 { TOneBranchProcessor -------------------------------------------------------- }
 
 type
   TOneBranchProcessor = class
   strict private
-    SizeInBranch, SizeInBranchToFree: QWord;
+    SizeInBranch, SizeInBranchFreed: QWord;
 
     { Filled with permalink numbers ("last succesfull" etc.)
       before ProcessBuildDir is called.
@@ -126,15 +126,15 @@ begin
     if AgeInDays > DeleteWhenOlderThanDays then
       if BuildNumberCanBeRemoved(BuildNumber) then
       begin
-        SizeAllToFree += DirSize;
-        SizeInBranchToFree += DirSize;
+        SizeAllFreed += DirSize;
+        SizeInBranchFreed += DirSize;
         Writeln(Format('    %s %d, age %dd', [
           Iff(DryRun, 'Would remove', 'Removing'),
           BuildNumber,
           AgeInDays
         ]));
         if not DryRun then
-          RemoveNonEmptyDir(FileInfo.AbsoluteName, true);
+          RemoveNonEmptyDir(FileInfo.AbsoluteName);
     end;
   end;
 end;
@@ -200,10 +200,10 @@ begin
     BranchPermalinks);
 
   SizeInBranch := 0;
-  SizeInBranchToFree := 0;
+  SizeInBranchFreed := 0;
   FindFiles(InclPathDelim(BranchDir) + 'builds', '*', true, @ProcessBuildDir, []);
-  Writeln(Format('  Branch: ' + ExtractFileName(BranchDir) + '. To free: %s, total: %s. Permalinks: %s', [
-    SizeToStr(SizeInBranchToFree),
+  Writeln(Format('  Branch: ' + ExtractFileName(BranchDir) + '. Removed: %s, total: %s. Permalinks: %s', [
+    SizeToStr(SizeInBranchFreed),
     SizeToStr(SizeInBranch),
     PermalinksToStr(BranchPermalinks)
   ]));
@@ -242,6 +242,10 @@ var
   FindResults: TCastleStringList;
   FindExitStatus: Integer;
 begin
+  InitializeLog;
+  // no need, log will go to console by default on Unix
+  //ApplicationProperties.OnWarning.Add(@ApplicationProperties.WriteWarningOnConsole);
+
   CheckDiskUsage;
 
   { Parse --really-remove param }
@@ -268,8 +272,8 @@ begin
       ProcessBranchesDir(CombinePaths(BaseJenkinsJobsDir, RelativeBranchesDir));
   finally FreeAndNil(FindResults) end;
 
-  Writeln(Format('  Total: to free: %s, everything: %s', [
-    SizeToStr(SizeAllToFree),
+  Writeln(Format('  Summary: Removed: %s, total: %s', [
+    SizeToStr(SizeAllFreed),
     SizeToStr(SizeAll)
   ]));
 
