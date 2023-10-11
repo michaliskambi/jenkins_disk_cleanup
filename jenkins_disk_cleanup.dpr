@@ -13,6 +13,9 @@ const
 
   BaseJenkinsJobsDir = '/var/lib/jenkins/jobs';
 
+  { Set to @false to actually delete. }
+  DryRun = true;
+
 { Get the last modification time of a directory.
   Returns @false if cannot get the time. (e.g. because the directory doesn't
   exist, or user doesn't have permissions to get this data).
@@ -38,11 +41,70 @@ begin
 end;
 
 var
-  SizeAll, SizeAllToFree, SizeInBranch, SizeInBranchToFree: QWord;
+  SizeAll, SizeAllToFree: QWord;
 
-procedure FindBuildDir(const FileInfo: TFileInfo; Data: Pointer; var StopSearch: boolean);
+{ TOneBranchProcessor -------------------------------------------------------- }
+
+type
+  TOneBranchProcessor = class
+  strict private
+    SizeInBranch, SizeInBranchToFree: QWord;
+
+    { Filled with permalink numbers ("last succesfull" etc.)
+      before ProcessBuildDir is called.
+      Contains only numbers >= 0 (that look like actual build numbers). }
+    BranchPermalinks: TIntegerList;
+
+    procedure ProcessBuildDir(const FileInfo: TFileInfo; var StopSearch: boolean);
+
+    { Read permalinks Jenkins file (with "last successfull" etc.),
+      put all numbers into Permalinks.
+      We don't differentiate between them (what is "last successfull",
+      "last failed") because they all should be protected from deletion.
+
+      Sample file contents:
+
+        lastCompletedBuild 2
+        lastFailedBuild 2
+        lastStableBuild -1
+        lastSuccessfulBuild -1
+        lastUnstableBuild -1
+        lastUnsuccessfulBuild 2
+    }
+    class procedure ReadPermalinks(const FileName: String;
+      const Permalinks: TIntegerList); static;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure ProcessOneBranch(const BranchDir: String);
+  end;
+
+constructor TOneBranchProcessor.Create;
+begin
+  inherited;
+  BranchPermalinks := TIntegerList.Create;
+end;
+
+destructor TOneBranchProcessor.Destroy;
+begin
+  FreeAndNil(BranchPermalinks);
+  inherited;
+end;
+
+procedure TOneBranchProcessor.ProcessBuildDir(const FileInfo: TFileInfo; var StopSearch: boolean);
+
+  function BuildNumberCanBeRemoved(const BuildNumber: Integer): Boolean;
+  var
+    PermalinkNumber: Integer;
+  begin
+    for PermalinkNumber in BranchPermalinks do
+      if Between(BuildNumber, PermalinkNumber - KeepLastBuilds + 1, PermalinkNumber) then
+        Exit(false);
+    Result := true;
+  end;
+
 var
-  BuildNumber: Integer;
+  BuildNumber, AgeInDays: Integer;
   DirSize: QWord;
   DirAge: TDateTime;
 begin
@@ -59,76 +121,67 @@ begin
       Exit;
     end;
 
-    if DaysBetween(Now, DirAge) > DeleteWhenOlderThanDays then
-    begin
-      SizeAllToFree += DirSize;
-      SizeInBranchToFree += DirSize;
-      // TODO: actually delete, if not DryRun
-      // TODO: honor KeepLastBuilds
-      // TODO: do not delete builds indicated by symlinks "last successful" etc.
+    AgeInDays := DaysBetween(Now, DirAge);
+    if AgeInDays > DeleteWhenOlderThanDays then
+      if BuildNumberCanBeRemoved(BuildNumber) then
+      begin
+        SizeAllToFree += DirSize;
+        SizeInBranchToFree += DirSize;
+        Writeln(Format('    %s %d, age %dd', [
+          Iff(DryRun, 'Would remove', 'Removing'),
+          BuildNumber,
+          AgeInDays
+        ]));
+        if not DryRun then
+          RemoveNonEmptyDir(FileInfo.AbsoluteName, true);
     end;
   end;
 end;
 
-procedure FindBranchDir(const FileInfo: TFileInfo; Data: Pointer; var StopSearch: boolean);
+class procedure TOneBranchProcessor.ReadPermalinks(const FileName: String;
+  const Permalinks: TIntegerList); static;
 var
-  BranchPermalinks: TIntegerList;
+  Lines: TCastleStringList;
+  Line, Token: String;
+  SeekPos, BuildNum: Integer;
+begin
+  Permalinks.Clear;
+  Lines := TCastleStringList.Create;
+  try
+    Lines.LoadFromFile(FileName);
+    for Line in Lines do
+      if Trim(Line) <> '' then
+      begin
+        SeekPos := 1;
 
-  { Read permalinks Jenkins file (with "last successfull" etc.),
-    put all numbers into Permalinks.
-    We don't differentiate between them (what is "last successfull",
-    "last failed") because they all should be protected from deletion.
+        Token := NextToken(Line, SeekPos);
+        if Token = '' then
+          raise Exception.CreateFmt('Cannot read 1st token in line "%s" from file "%s"', [
+            Line,
+            FileName
+          ]);
 
-    Sample file contents:
+        Token := NextToken(Line, SeekPos);
+        if Token = '' then
+          raise Exception.CreateFmt('Cannot read 2nd token in line "%s" from file "%s"', [
+            Line,
+            FileName
+          ]);
 
-      lastCompletedBuild 2
-      lastFailedBuild 2
-      lastStableBuild -1
-      lastSuccessfulBuild -1
-      lastUnstableBuild -1
-      lastUnsuccessfulBuild 2
-  }
-  procedure ReadPermalinks(const FileName: String; Permalinks: TIntegerList);
-  var
-    Lines: TCastleStringList;
-    Line, Token: String;
-    SeekPos, BuildNum: Integer;
-  begin
-    Permalinks.Clear;
-    Lines := TCastleStringList.Create;
-    try
-      Lines.LoadFromFile(FileName);
-      for Line in Lines do
-        if Trim(Line) <> '' then
-        begin
-          SeekPos := 1;
+        BuildNum := StrToInt(Token);
+        if BuildNum >= 0 then
+          Permalinks.Add(BuildNum)
+        else
+        if BuildNum <> -1 then
+          raise Exception.CreateFmt('Unexpected negative build number "%d" in file "%s"', [
+            BuildNum,
+            FileName
+          ]);
+      end;
+  finally FreeAndNil(Lines) end;
+end;
 
-          Token := NextToken(Line, SeekPos);
-          if Token = '' then
-            raise Exception.CreateFmt('Cannot read 1st token in line "%s" from file "%s"', [
-              Line,
-              FileName
-            ]);
-
-          Token := NextToken(Line, SeekPos);
-          if Token = '' then
-            raise Exception.CreateFmt('Cannot read 2nd token in line "%s" from file "%s"', [
-              Line,
-              FileName
-            ]);
-
-          BuildNum := StrToInt(Token);
-          if BuildNum >= 0 then
-            Permalinks.Add(BuildNum)
-          else
-          if BuildNum <> -1 then
-            raise Exception.CreateFmt('Unexpected negative build number "%d" in file "%s"', [
-              BuildNum,
-              FileName
-            ]);
-        end;
-    finally FreeAndNil(Lines) end;
-  end;
+procedure TOneBranchProcessor.ProcessOneBranch(const BranchDir: String);
 
   function PermalinksToStr(const List: TIntegerList): String;
   var
@@ -141,29 +194,34 @@ var
   end;
 
 begin
+  ReadPermalinks(
+    InclPathDelim(BranchDir) + 'builds' + PathDelim + 'permalinks',
+    BranchPermalinks);
+
+  SizeInBranch := 0;
+  SizeInBranchToFree := 0;
+  FindFiles(InclPathDelim(BranchDir) + 'builds', '*', true, @ProcessBuildDir, []);
+  Writeln(Format('  Branch: ' + ExtractFileName(BranchDir) + '. To free: %s, total: %s. Permalinks: %s', [
+    SizeToStr(SizeInBranchToFree),
+    SizeToStr(SizeInBranch),
+    PermalinksToStr(BranchPermalinks)
+  ]));
+  Flush(Output); // see results immediately, while sizes of next dirs is calculated
+end;
+
+{ end of TOneBranchProcessor -------------------------------------------------------- }
+
+procedure FindBranchDir(const FileInfo: TFileInfo; Data: Pointer; var StopSearch: boolean);
+var
+  OneBranchProcessor: TOneBranchProcessor;
+begin
   if not FileInfo.Directory then
     Exit;
 
-  BranchPermalinks := TIntegerList.Create;
+  OneBranchProcessor := TOneBranchProcessor.Create;
   try
-    ReadPermalinks(
-      InclPathDelim(FileInfo.AbsoluteName) + 'builds' + PathDelim + 'permalinks',
-      BranchPermalinks);
-
-    // TODO: BranchBuildToKeep := GetMinimumBuildToKeep(BranchPermalinks) - KeepLastBuilds;
-
-    SizeInBranch := 0;
-    SizeInBranchToFree := 0;
-    FindFiles(InclPathDelim(FileInfo.AbsoluteName) + 'builds', '*',
-      true, @FindBuildDir, nil, []);
-    Writeln(Format('  Branch: ' + FileInfo.Name + '. To free: %s, total: %s. Permalinks: %s', [
-      SizeToStr(SizeInBranchToFree),
-      SizeToStr(SizeInBranch),
-      PermalinksToStr(BranchPermalinks)
-    ]));
-    Flush(Output); // see results immediately, while sizes of next dirs is calculated
-
-  finally FreeAndNil(BranchPermalinks) end;
+    OneBranchProcessor.ProcessOneBranch(FileInfo.AbsoluteName);
+  finally FreeAndNil(OneBranchProcessor) end;
 end;
 
 procedure ProcessBranchesDir(const BranchesDir: String);
