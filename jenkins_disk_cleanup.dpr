@@ -1,6 +1,6 @@
 uses SysUtils, DateUtils,
   CastleFindFiles, CastleLog, CastleStringUtils, CastleFilesUtils,
-  CastleUtils,
+  CastleUtils, CastleParameters,
   ToolCommonUtils;
 
 const
@@ -13,8 +13,9 @@ const
 
   BaseJenkinsJobsDir = '/var/lib/jenkins/jobs';
 
+var
   { Set to @false to actually delete. }
-  DryRun = true;
+  DryRun: Boolean = true;
 
 { Get the last modification time of a directory.
   Returns @false if cannot get the time. (e.g. because the directory doesn't
@@ -242,6 +243,16 @@ var
   FindExitStatus: Integer;
 begin
   CheckDiskUsage;
+
+  { Parse --really-remove param }
+  Parameters.CheckHighAtMost(1);
+  if Parameters.High = 1 then
+  begin
+    if Parameters[1] = '--really-remove' then
+      DryRun := false
+    else
+      raise EInvalidParams.CreateFmt('Invalid 1st param %s', [Parameters[1]]);
+  end;
 
   RunCommandIndirPassthrough(BaseJenkinsJobsDir, '/usr/bin/find',
     ['-maxdepth', '4', '-type', 'd', '-name', 'branches'],
