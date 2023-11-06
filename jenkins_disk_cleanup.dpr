@@ -264,6 +264,9 @@ begin
   if FindExitStatus <> 0 then
     raise Exception.CreateFmt('find failed with exit status %d', [FindExitStatus]);
 
+  // Debug: Test ho it behaves in a single project
+  // FindResultsStr := '/var/lib/jenkins/jobs/..../branches';
+
   FindResults := TCastleStringList.Create;
   try
     FindResults.Text := FindResultsStr;
