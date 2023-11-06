@@ -2,7 +2,7 @@
 
 Scan the jobs of Jenkins, delete old builds:
 
-- Only deletes builds older than `DeleteWhenOlderThanDays = 40`.
+- Only deletes builds older than `DeleteWhenOlderThanDays` (10 now).
 
 - Keep some builds (the last `KeepLastBuilds = 10` builds since any "permalink" build like "last successful" etc. builds) always, regardless of age.
 

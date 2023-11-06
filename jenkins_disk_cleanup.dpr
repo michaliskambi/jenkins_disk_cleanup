@@ -5,7 +5,7 @@ uses SysUtils, DateUtils,
 
 const
   { Delete builds older than this number of days. }
-  DeleteWhenOlderThanDays = 40;
+  DeleteWhenOlderThanDays = 10;
 
   { Keep this many last builds.
     They will not be deleted, even if older than DeleteWhenOlderThanDays. }
